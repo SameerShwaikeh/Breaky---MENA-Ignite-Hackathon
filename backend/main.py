@@ -7,9 +7,20 @@ from backend.db import init_db, get_session, Record, Alert
 from backend.schema import ClinicalRecordIn, IngestResult, DailyCount
 
 app = FastAPI(title="BREAKY Ingestion API", version="0.1")
+from fastapi.middleware.cors import CORSMiddleware
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.on_event("startup")
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 def _startup():
     init_db()
 
