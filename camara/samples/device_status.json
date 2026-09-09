@@ -1,1 +1,5 @@
-{"_mock": true, "reachable": true, "roaming": false}
+{
+  "reachable": true,
+  "connectivity": ["SMS"],
+  "lastStatusTime": "2026-09-09T18:06:49.320815Z"
+}
