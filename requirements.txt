@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+sqlmodel
+pandas
+numpy
+python-dotenv
+requests
+network-as-code
+streamlit
