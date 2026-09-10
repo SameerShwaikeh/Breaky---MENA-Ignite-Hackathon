@@ -55,15 +55,22 @@ def check_sim_swap(phone_number: str, max_age_hours: int = 240) -> dict:
 
 
 def get_device_status(device_id: str) -> dict:
-    """Reachability + roaming. Drives offline-queue vs live-sync decision."""
+    """Reachability + connectivity. Drives offline-queue vs live-sync decision."""
     if MODE == "mock":
         raw = _sample("device_status")
-        return {"reachable": raw.get("reachable", True), "roaming": raw.get("roaming", False), "raw": raw}
+        # التعديل هنا: استخدام connectivity كمصفوفة بدلاً من roaming بناءً على تجربة يارا
+        return {"reachable": raw.get("reachable", True), "connectivity": raw.get("connectivity", ["SMS", "DATA"]), "raw": raw}
+    
     dev = _device(_client(), device_id)
     reach = dev.get_connectivity()
-    roam = dev.get_roaming()
-    raw = {"connectivity": str(reach), "roaming": str(roam)}
-    return {"reachable": "CONNECTED" in raw["connectivity"].upper(), "roaming": "TRUE" in raw["roaming"].upper(), "raw": raw}
+    
+    # التعديل هنا للـ Live Mode: الاستغناء عن roaming واسترجاع connectivity كمصفوفة
+    raw = {"connectivity": str(reach)}
+    
+    is_reachable = "CONNECTED" in str(reach).upper() or "TRUE" in str(reach).upper()
+    connectivity_array = ["SMS"] if is_reachable else []
+    
+    return {"reachable": is_reachable, "connectivity": connectivity_array, "raw": raw}
 
 
 def request_qod(device_id: str, profile: str = "QOS_L", duration_s: int = 600) -> dict:
