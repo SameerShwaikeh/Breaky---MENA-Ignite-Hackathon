@@ -55,10 +55,11 @@ def check_sim_swap(phone_number: str, max_age_hours: int = 240) -> dict:
 
 
 def get_device_status(device_id: str) -> dict:
-    """Reachability + roaming. Drives offline-queue vs live-sync decision."""
+    """Reachability + connectivity type. Drives offline-queue vs live-sync decision."""
     if MODE == "mock":
         raw = _sample("device_status")
-        return {"reachable": raw.get("reachable", True), "roaming": raw.get("roaming", False), "raw": raw}
+        return {"reachable": raw.get("reachable", True),
+                "connectivity": raw.get("connectivity", []), "raw": raw}
     dev = _device(_client(), device_id)
     reach = dev.get_connectivity()
     roam = dev.get_roaming()
