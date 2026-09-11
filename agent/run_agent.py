@@ -12,12 +12,10 @@ import json
 from groq import Groq
 from dotenv import load_dotenv
 
-# استدعاء الدوال من المشروع
 try:
     from camara.client import check_sim_swap, verify_location, get_device_status
     from agent.anomaly import run_anomaly_detection_model
 except ImportError:
-    # Mocks مؤقتة تُرجع كل المعاملات الإحصائية الثلاثة
     def check_sim_swap(phone_number: str): 
         return {"swapped": False, "raw": {}}
         
@@ -27,37 +25,55 @@ except ImportError:
     def get_device_status(device_id: str): 
         return {"reachable": True, "connectivity": ["DATA", "SMS"], "raw": {}}
         
-    def run_anomaly_detection_model(city: str, syndrome_code: str): 
+    import random
+
+    def run_anomaly_detection_model(city: str, syndrome_code: str):
+        actual_cases = random.randint(10, 60)
+        
+        z_score = round((actual_cases - 15) / 5.0 + random.uniform(-0.3, 0.3), 2)
+        ma_dev = round((actual_cases - 20) / 8.0 + random.uniform(-0.2, 0.2), 2)
+        cusum = round((actual_cases - 18) / 7.0 + random.uniform(-0.4, 0.4), 2)
+        
+        z_flagged = z_score > 2.0
+        ma_flagged = ma_dev > 1.5
+        cusum_flagged = cusum > 2.2
+        
+        models_flagged = sum([z_flagged, ma_flagged, cusum_flagged])
+        
+        if models_flagged >= 2:
+            risk = "OUTBREAK"
+        elif models_flagged == 1:
+            risk = "WATCH"
+        else:
+            risk = "NORMAL"
+            
         return {
             "city": city,
             "syndrome": syndrome_code,
-            "risk_level": "OUTBREAK", 
+            "risk_level": risk, 
             "metrics": {
-                "actual_cases": 45,
-                "z_score": 4.2,
-                "ma_deviation": 1.8,
-                "cusum": 3.5,
-                "models_flagged": 3
+                "actual_cases": actual_cases,
+                "z_score": z_score,
+                "ma_deviation": ma_dev,
+                "cusum": cusum,
+                "models_flagged": models_flagged
             }
-        }
+        }   
 
 def check_medicine_stock(city: str, syndrome_code: str):
     return {"status": "Sufficient"}
 
-# استقبال كافة المعاملات الإحصائية
 def emit_ministry_alert(city: str, syndrome_code: str, risk_level: str, z_score: float = 0.0, ma_deviation: float = 0.0, cusum: float = 0.0, evidence: dict = None):
     return {"status": "ALERT_EMITTED", "alert_id": 9921}
 
-# تحميل المتغيرات البيئية من ملف .env
 load_dotenv()
 
-# تعريف الأدوات لـ Groq و Gemini
 TOOLS = [
     {
         "type": "function",
         "function": {
             "name": "verify_reporter_identity",
-            "description": "Verify if the reporter's phone number is trusted using SIM Swap detection.",
+            "description": "Verify phone via SIM Swap.",
             "parameters": {
                 "type": "object",
                 "properties": {"phone_number": {"type": "string"}},
@@ -69,7 +85,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "verify_facility_location",
-            "description": "Verify if the device is actually at the expected facility location.",
+            "description": "Verify facility GPS location.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -85,7 +101,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "check_network_quality",
-            "description": "Check if the device is reachable on the network.",
+            "description": "Check device network status.",
             "parameters": {
                 "type": "object",
                 "properties": {"device_id": {"type": "string"}},
@@ -97,7 +113,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "run_anomaly_detection",
-            "description": "Run ensemble statistical models (Z-Score, Moving Average, CUSUM) to detect outbreaks.",
+            "description": "Run statistical models for outbreak detection.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -112,7 +128,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "check_medicine_stock",
-            "description": "Check if there is sufficient medicine stock for the syndrome in the city.",
+            "description": "Check medicine stock in city.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -127,7 +143,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "emit_ministry_alert",
-            "description": "Emit an official alert to the Ministry of Health including all ensemble statistical metrics.",
+            "description": "Emit alert with statistical metrics to Ministry.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -154,19 +170,16 @@ TOOL_IMPL = {
     "emit_ministry_alert": emit_ministry_alert
 }
 
-SYSTEM_PROMPT = """You are BREAKY, an Autonomous Epidemiological Surveillance Agent deployed for disease outbreak detection.
-Your mission is to validate incident reports from healthcare facilities, check network reliability, run ensemble statistical models, and emit alerts to the Ministry of Health if an outbreak or anomaly is detected.
+SYSTEM_PROMPT = """You are BREAKY, an epidemiological agent.
+Follow sequence:
+1. verify_reporter_identity (If untrusted -> REJECTED_IDENTITY)
+2. verify_facility_location
+3. check_network_quality (If unreachable -> QUEUED_OFFLINE)
+4. run_anomaly_detection
+5. check_medicine_stock
+6. emit_ministry_alert (If WATCH/ALERT/OUTBREAK, pass z_score, ma_deviation, cusum).
 
-Always follow this evaluation sequence using your available tools:
-1. Verify reporter identity (verify_reporter_identity). If untrusted, abort and return REJECTED_IDENTITY.
-2. Verify facility location (verify_facility_location).
-3. Check network quality (check_network_quality). If unreachable, queue offline and return QUEUED_OFFLINE.
-4. Run anomaly detection (run_anomaly_detection) for the reported city and syndrome.
-5. Check medicine stock (check_medicine_stock) for the reported city and syndrome.
-6. If risk level is WATCH, ALERT, or OUTBREAK, emit a ministry alert (emit_ministry_alert) passing all metrics returned by anomaly detection (z_score, ma_deviation, cusum).
-
-In your final Markdown summary report, you MUST explicitly detail all three ensemble model metrics: Z-Score, Moving Average Deviation, and CUSUM score.
-"""
+Return a concise Markdown report explicitly listing Z-Score, MA Dev, and CUSUM score. Keep output under 200 words."""
 
 def decide(report_data: dict) -> str:
     """
@@ -174,14 +187,13 @@ def decide(report_data: dict) -> str:
     """
     groq_api_key = os.environ.get("GROQ_API_KEY")
     
-    # --- الخطة أ: التشغيل باستخدام Groq ---
     if groq_api_key:
         try:
             print(f"[*] Trying Groq API for {report_data.get('city')}...")
             client = Groq(api_key=groq_api_key)
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"Process this new report: {json.dumps(report_data)}"}
+                {"role": "user", "content": f"Process this report: {json.dumps(report_data)}"}
             ]
             
             while True:
@@ -190,7 +202,7 @@ def decide(report_data: dict) -> str:
                     messages=messages,
                     tools=TOOLS,
                     tool_choice="auto",
-                    max_tokens=1024
+                    max_tokens=500 
                 )
                 
                 response_message = response.choices[0].message
@@ -218,10 +230,9 @@ def decide(report_data: dict) -> str:
                         "content": json.dumps(func_response)
                     })
         except Exception as e:
-            print(f"[!] Groq API failed (maybe quota exceeded): {e}")
+            print(f"[!] Groq API failed: {e}")
             print("[*] Switching to Gemini Fallback...")
 
-    # --- الخطة ب: التشغيل باستخدام Gemini (Fallback) بالباكيج الجديدة ---
     gemini_api_key = os.environ.get("GEMINI_API_KEY")
     if not gemini_api_key:
         return "Error: Groq failed and GEMINI_API_KEY is not set in .env file."
@@ -230,11 +241,10 @@ def decide(report_data: dict) -> str:
         from google import genai
         from google.genai import types
     except ImportError:
-        return "Error: Please install the new Gemini SDK using: pip install google-genai"
+        return "Error: Please install Gemini SDK using: pip install google-genai"
 
     print("[*] Switching to Gemini Fallback (New SDK)...")
     client = genai.Client(api_key=gemini_api_key)
-    
     gemini_tools = list(TOOL_IMPL.values())
     
     try:
@@ -246,7 +256,7 @@ def decide(report_data: dict) -> str:
                 temperature=0.1,
             )
         )
-        response = chat.send_message(f"Process this new report: {json.dumps(report_data)}")
+        response = chat.send_message(f"Process this report: {json.dumps(report_data)}")
         
         print("\n=== AGENT FINAL DECISION (GEMINI) ===")
         print(response.text)
