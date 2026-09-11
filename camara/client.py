@@ -61,6 +61,7 @@ def get_device_status(device_id: str) -> dict:
         # التعديل هنا: استخدام connectivity كمصفوفة بدلاً من roaming بناءً على تجربة يارا
         return {"reachable": raw.get("reachable", True), "connectivity": raw.get("connectivity", ["SMS", "DATA"]), "raw": raw}
     
+
     dev = _device(_client(), device_id)
     reach = dev.get_connectivity()
     
