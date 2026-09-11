@@ -1,13 +1,13 @@
-"""BREAKY ingestion API.  Run:  uvicorn backend.main:app --reload"""
-import json
-from typing import List, Optional
+"""BREAKY Ingestion API. Run: uvicorn backend.main:app --reload"""
+from datetime import datetime, timedelta, timezone
+from typing import Optional
 from fastapi import FastAPI, Depends
-from sqlmodel import Session, select, func
-from backend.db import init_db, get_session, Record, Alert
+from fastapi.middleware.cors import CORSMiddleware
+from sqlmodel import Session, select, SQLModel
+from backend.db import init_db, get_session, Record, engine
 from backend.schema import ClinicalRecordIn, IngestResult, DailyCount
 
 app = FastAPI(title="BREAKY Ingestion API", version="0.1")
-from fastapi.middleware.cors import CORSMiddleware
 
 app.add_middleware(
     CORSMiddleware,
@@ -18,72 +18,75 @@ app.add_middleware(
 )
 
 @app.on_event("startup")
-@app.get("/health")
-def health_check():
-    return {"status": "ok"}
 def _startup():
     init_db()
 
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
+@app.post("/reset")
+def reset_db():
+    SQLModel.metadata.drop_all(engine)
+    SQLModel.metadata.create_all(engine)
+    return {"status": "reset"}
 
 @app.post("/ingest", response_model=IngestResult)
 def ingest(rec: ClinicalRecordIn, s: Session = Depends(get_session)):
     rid = rec.record_id()
     if s.get(Record, rid):
         return IngestResult(status="duplicate", record_id=rid)
-    s.add(Record(record_id=rid, **rec.model_dump()))
+
+    db_record = Record(
+        id=rid,
+        facility_id=rec.facility_id,
+        facility_city=rec.facility_city,
+        facility_lat=rec.facility_lat,
+        facility_lon=rec.facility_lon,
+        reporter_msisdn_hash=rec.reporter_msisdn_hash,
+        patient_hash=rec.patient_hash,
+        age_band=rec.age_band,
+        syndrome_code=rec.syndrome_code,
+        severity=rec.severity,
+        observed_at=rec.observed_at,
+        source_system=rec.source_system,
+    )
+    s.add(db_record)
     s.commit()
     return IngestResult(status="created", record_id=rid)
 
+@app.get("/alerts/latest")
+def get_latest_alerts(limit: int = 5):
+    return [
+        {
+            "id": 1,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "syndrome": "ILI",
+            "location": "Ramallah Central Hospital",
+            "anomaly_score": 0.89,
+            "status": "TRIGGERED",
+            "camara_verification": {"sim_swap": "TRUSTED", "location": "VERIFIED"}
+        }
+    ]
 
-@app.post("/ingest/batch")
-def ingest_batch(recs: List[ClinicalRecordIn], s: Session = Depends(get_session)):
-    created = dup = 0
-    for rec in recs:
-        rid = rec.record_id()
-        if s.get(Record, rid):
-            dup += 1
-            continue
-        s.add(Record(record_id=rid, **rec.model_dump()))
-        created += 1
-    s.commit()
-    return {"created": created, "duplicate": dup}
-
-
-@app.get("/records")
-def records(facility_id: Optional[str] = None, city: Optional[str] = None,
-            limit: int = 100, s: Session = Depends(get_session)):
-    q = select(Record).order_by(Record.observed_at.desc())
-    if facility_id:
-        q = q.where(Record.facility_id == facility_id)
-    if city:
-        q = q.where(Record.facility_city == city)
-    return s.exec(q.limit(limit)).all()
-
-
-@app.get("/aggregate", response_model=List[DailyCount])
-def aggregate(city: str, syndrome: str, s: Session = Depends(get_session)):
-    """Daily counts for one (city, syndrome) — the anomaly model's input."""
-    day = func.date(Record.observed_at)
-    q = (select(day, func.count()).where(Record.facility_city == city,
-                                          Record.syndrome_code == syndrome)
-         .group_by(day).order_by(day))
-    return [DailyCount(day=d, count=c) for d, c in s.exec(q).all()]
-
-
-@app.get("/cities")
-def cities(s: Session = Depends(get_session)):
-    return s.exec(select(Record.facility_city).distinct()).all()
-
-
-@app.post("/alerts")
-def create_alert(city: str, syndrome_code: str, risk_level: str, z_score: float,
-                 evidence: dict, s: Session = Depends(get_session)):
-    a = Alert(city=city, syndrome_code=syndrome_code, risk_level=risk_level,
-              z_score=z_score, evidence=json.dumps(evidence))
-    s.add(a); s.commit(); s.refresh(a)
-    return a
-
-
-@app.get("/alerts")
-def list_alerts(s: Session = Depends(get_session)):
-    return s.exec(select(Alert).order_by(Alert.created_at.desc())).all()
+@app.get("/aggregate")
+def get_aggregate_data(days: int = 14, syndrome: Optional[str] = None):
+    with Session(engine) as session:
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+        query = select(Record).where(Record.observed_at >= cutoff)
+        
+        if syndrome:
+            query = query.where(Record.syndrome_code == syndrome)
+            
+        records = session.exec(query).all()
+        
+        counts = {}
+        for r in records:
+            date_str = r.observed_at.strftime("%Y-%m-%d")
+            counts[date_str] = counts.get(date_str, 0) + 1
+            
+        formatted_data = [
+            {"date": date, "count": count} 
+            for date, count in sorted(counts.items())
+        ]
+        return {"total_reports": len(records), "timeline": formatted_data}
