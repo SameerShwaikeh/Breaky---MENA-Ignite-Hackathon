@@ -1,90 +1,83 @@
-"""Ensemble anomaly detection on daily syndrome counts (Global Health Standards).
-Uses 3 models: Z-Score (sudden spikes), Moving Average (trends), and CUSUM (sustained shifts)."""
-import json, urllib.request
-import numpy as np
+import csv
+import math
+from datetime import datetime, timedelta
+from pathlib import Path
 
-API = "http://127.0.0.1:8000"
-WINDOW = 14
-GUARD = 3          # exclude the most recent days from baseline so an outbreak can't hide itself
+CSV_PATH = Path(__file__).parent.parent / "data" / "mock_records.csv"
 
-def fetch_daily_counts(city: str, syndrome: str) -> list[dict]:
-    try:
-        url = f"{API}/aggregate?city={city}&syndrome={syndrome}"
-        return json.load(urllib.request.urlopen(url))
-    except Exception:
-        # Fallback for testing if API is down
-        return [{"day": f"2026-09-{i:02d}", "count": int(np.random.normal(10, 2))} for i in range(1, 21)]
+def get_case_history_from_csv(city: str, syndrome_code: str, days: int = 30) -> list[int]:
+    """تجميع الحالات اليومية للمدينة والرمز من ملف الـ CSV لآخر 30 يوماً"""
+    if not CSV_PATH.exists():
+        return [10] * days
 
-def run_ensemble_models(counts: list[int]) -> tuple[float, float, float]:
-    """Calculates Z-Score, Moving Average Deviation, and CUSUM."""
-    if len(counts) < WINDOW + GUARD + 1:
-        return 0.0, 0.0, 0.0
+    daily_counts = {}
+    with open(CSV_PATH, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if row["facility_city"].lower() == city.lower() and row["syndrome_code"] == syndrome_code:
+                date_str = row["observed_at"][:10]
+                daily_counts[date_str] = daily_counts.get(date_str, 0) + 1
 
-    # Baseline calculations
-    baseline = counts[-(WINDOW + GUARD):-GUARD]
-    latest = counts[-1]
-    
-    mu = float(np.mean(baseline))
-    sd = float(np.std(baseline, ddof=1)) if len(baseline) > 1 else 1.0
-    if sd == 0: sd = 1.0 
+    end_date = datetime(2026, 9, 9)
+    case_history = []
+    for i in range(days - 1, -1, -1):
+        d_str = (end_date - timedelta(days=i)).strftime("%Y-%m-%d")
+        case_history.append(daily_counts.get(d_str, 0))
 
-    # 1. Z-Score (Detects sudden, massive single-day spikes)
-    z_score = (latest - mu) / sd
+    return case_history
 
-    # 2. Moving Average Deviation (Detects short-term rising trends over 7 days)
-    ma_7 = float(np.mean(counts[-7:]))
-    ma_dev = (ma_7 - mu) / sd
+def calculate_z_score(cases: list[int]) -> float:
+    if len(cases) < 2: return 0.0
+    current, history = cases[-1], cases[:-1]
+    mean = sum(history) / len(history)
+    var = sum((x - mean) ** 2 for x in history) / len(history)
+    std = math.sqrt(var) if var > 0 else 1.0
+    return round((current - mean) / std, 2)
 
-    # 3. CUSUM - Cumulative Sum (Detects slow, subtle, but sustained outbreaks)
-    cusum = 0.0
-    k = 0.5  # allowance (ignores minor noise)
-    for x in counts[-7:]:
-        cusum = max(0.0, cusum + ((x - mu) / sd) - k)
+def calculate_ma_deviation(cases: list[int], window: int = 5) -> float:
+    if len(cases) < window: return 0.0
+    current, recent = cases[-1], cases[-(window+1):-1]
+    ma = sum(recent) / len(recent)
+    var = sum((x - ma) ** 2 for x in recent) / len(recent)
+    std = math.sqrt(var) if var > 0 else 1.0
+    return round((current - ma) / std, 2)
 
-    return z_score, ma_dev, cusum
+def calculate_cusum(cases: list[int], k: float = 0.5) -> float:
+    if len(cases) < 2: return 0.0
+    history = cases[:-1]
+    mean = sum(history) / len(history)
+    cusum_val = 0.0
+    for x in cases:
+        cusum_val = max(0.0, cusum_val + ((x - mean) - k))
+    return round(cusum_val / (mean if mean > 0 else 1.0), 2)
 
-def assess(city: str, syndrome: str, counts: list[dict] | None = None) -> dict:
-    counts = counts or fetch_daily_counts(city, syndrome)
-    
-    if not counts:
-        return {"error": "No data available"}
+def run_anomaly_detection_model(city: str, syndrome_code: str) -> dict:
+    """المحرك الرئيسي: يقرأ من الـ CSV ويحسب المؤشرات تلقائياً"""
+    case_history = get_case_history_from_csv(city, syndrome_code)
+    actual_cases = case_history[-1]
 
-    days = [d["day"] for d in counts]
-    vals = [d["count"] for d in counts]
-    
-    z_score, ma_dev, cusum = run_ensemble_models(vals)
-    
-    # --- Global Standard Voting Logic ---
-    flags = 0
-    if z_score >= 2.5: flags += 1     # Strong single spike
-    if ma_dev >= 1.5: flags += 1      # Unusually high week
-    if cusum >= 3.0: flags += 1       # Sustained accumulation of cases
+    z_score = calculate_z_score(case_history)
+    ma_dev = calculate_ma_deviation(case_history)
+    cusum = calculate_cusum(case_history)
 
-    # Decision Tree
-    if flags >= 2 or z_score >= 4.0:
-        risk = "OUTBREAK"
-    elif flags == 1:
-        risk = "WATCH"
+    models_flagged = sum([z_score > 2.0, ma_dev > 1.5, cusum > 2.0])
+
+    if models_flagged >= 2:
+        risk_level = "OUTBREAK"
+    elif models_flagged == 1:
+        risk_level = "WATCH"
     else:
-        risk = "NORMAL"
+        risk_level = "NORMAL"
 
     return {
-        "city": city, 
-        "syndrome": syndrome, 
-        "risk_level": risk, 
+        "city": city,
+        "syndrome": syndrome_code,
+        "risk_level": risk_level,
         "metrics": {
-            "z_score": round(z_score, 2),
-            "ma_deviation": round(ma_dev, 2),
-            "cusum": round(cusum, 2),
-            "models_flagged": flags
-        },
-        "latest_day": days[-1], 
-        "latest_count": vals[-1],
-        "baseline_mean": round(float(np.mean(vals[-(WINDOW + GUARD):-GUARD])), 1) if len(vals) > WINDOW else 0.0
+            "actual_cases": actual_cases,
+            "z_score": z_score,
+            "ma_deviation": ma_dev,
+            "cusum": cusum,
+            "models_flagged": models_flagged
+        }
     }
-
-if __name__ == "__main__":
-    import sys
-    # Test block
-    test_city, test_syn = (sys.argv[1], sys.argv[2]) if len(sys.argv) > 2 else ("Hebron", "AGE")
-    print(json.dumps(assess(test_city, test_syn), indent=2))
