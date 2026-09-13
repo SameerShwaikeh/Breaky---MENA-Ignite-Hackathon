@@ -11,10 +11,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# API Configuration
-BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+# API Configuration - Hardcoded to loopback
+BASE_URL = "http://127.0.0.1:8000"
 
-# Custom Professional Styling
+# Custom Styling
 st.markdown("""
     <style>
     .stApp { background-color: #0E1117; }
@@ -40,15 +40,14 @@ st.markdown("""
 # Data Fetching Functions
 def get_backend_health():
     try:
-        # Hitting /alerts instead of / to avoid 404 connection status failure
-        r = requests.get(f"{BASE_URL}/alerts", timeout=2)
+        r = requests.get(f"{BASE_URL}/alerts/latest", timeout=2)
         return r.status_code == 200
     except Exception:
         return False
 
 def get_alerts():
     try:
-        r = requests.get(f"{BASE_URL}/alerts", timeout=3)
+        r = requests.get(f"{BASE_URL}/alerts/latest", timeout=3)
         if r.status_code == 200:
             return r.json()
     except Exception:
@@ -57,7 +56,8 @@ def get_alerts():
 
 # Sidebar Controls
 st.sidebar.title("System Controls")
-if get_backend_health():
+is_online = get_backend_health()
+if is_online:
     st.sidebar.success("Backend API: Online")
 else:
     st.sidebar.error("Backend API: Offline")
@@ -66,8 +66,8 @@ st.sidebar.divider()
 st.sidebar.subheader("Filter Live Data")
 selected_risk = st.sidebar.multiselect(
     "Filter by Risk Level", 
-    options=["OUTBREAK", "WARNING", "EVALUATE"], 
-    default=["OUTBREAK", "WARNING"]
+    options=["OUTBREAK", "WARNING", "EVALUATE", "TRIGGERED"], 
+    default=["OUTBREAK", "WARNING", "TRIGGERED"]
 )
 
 # Main Dashboard Header
@@ -83,7 +83,12 @@ alerts_df = pd.DataFrame(alerts_data)
 kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 
 total_alerts = len(alerts_df) if not alerts_df.empty else 0
-outbreak_count = len(alerts_df[alerts_df['risk_level'] == 'OUTBREAK']) if not alerts_df.empty and 'risk_level' in alerts_df.columns else 0
+outbreak_count = 0
+if not alerts_df.empty:
+    if 'risk_level' in alerts_df.columns:
+        outbreak_count = len(alerts_df[alerts_df['risk_level'] == 'OUTBREAK'])
+    elif 'status' in alerts_df.columns:
+        outbreak_count = len(alerts_df[alerts_df['status'] == 'TRIGGERED'])
 
 with kpi1:
     st.metric("Total Active Alerts", total_alerts)
@@ -92,7 +97,7 @@ with kpi2:
 with kpi3:
     st.metric("Monitored Facilities", "12 Centers")
 with kpi4:
-    st.metric("System Status", "ACTIVE" if get_backend_health() else "DISCONNECTED")
+    st.metric("System Status", "ACTIVE" if is_online else "DISCONNECTED")
 
 st.divider()
 
@@ -106,22 +111,23 @@ with col_main:
         "Nablus Medical Center": {"lat": 32.2211, "lon": 35.2544},
         "Hebron Medical Center": {"lat": 31.5326, "lon": 35.0998},
         "Ramallah Medical Center": {"lat": 31.9038, "lon": 35.2034},
+        "Ramallah Central Hospital": {"lat": 31.9038, "lon": 35.2034},
         "Jenin Specialty Hospital": {"lat": 32.4590, "lon": 35.2954},
         "Gaza Primary Health": {"lat": 31.5017, "lon": 34.4668}
     }
     
     map_rows = []
-    if not alerts_df.empty and 'facility' in alerts_df.columns:
+    if not alerts_df.empty:
         for idx, row in alerts_df.iterrows():
-            fac = row.get('facility', 'Nablus Medical Center')
-            coords = facility_coords.get(fac, {"lat": 32.0, "lon": 35.2})
+            fac = row.get('facility', row.get('location', 'Ramallah Central Hospital'))
+            coords = facility_coords.get(fac, {"lat": 31.9038, "lon": 35.2034})
             map_rows.append({
                 "facility": fac,
                 "lat": coords["lat"],
                 "lon": coords["lon"],
-                "risk": row.get('risk_level', 'EVALUATE'),
-                "syndrome": row.get('syndrome_code', 'UNK'),
-                "z_score": max(abs(row.get('z_score', 1.0)) * 8, 10)
+                "risk": row.get('risk_level', row.get('status', 'TRIGGERED')),
+                "syndrome": row.get('syndrome_code', row.get('syndrome', 'ILI')),
+                "z_score": max(abs(row.get('z_score', row.get('anomaly_score', 1.0))) * 8, 12)
             })
     else:
         for fac, coords in facility_coords.items():
@@ -129,7 +135,6 @@ with col_main:
 
     geo_df = pd.DataFrame(map_rows)
     
-    # Swapped to open-street-map to remove API key requirement
     fig_map = px.scatter_mapbox(
         geo_df,
         lat="lat",
@@ -138,7 +143,7 @@ with col_main:
         color="risk",
         hover_name="facility",
         hover_data=["syndrome"],
-        color_discrete_map={"OUTBREAK": "#FF4B4B", "WARNING": "#FFAA00", "NORMAL": "#00CC96", "EVALUATE": "#1E90FF"},
+        color_discrete_map={"OUTBREAK": "#FF4B4B", "TRIGGERED": "#FF4B4B", "WARNING": "#FFAA00", "NORMAL": "#00CC96", "EVALUATE": "#1E90FF"},
         zoom=7.8,
         center={"lat": 31.9, "lon": 35.2},
         height=360
@@ -149,7 +154,7 @@ with col_main:
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)"
     )
-    st.plotly_chart(fig_map, width="stretch")
+    st.plotly_chart(fig_map, use_container_width=True)
 
     st.subheader("Syndrome Density Heatmap")
     
@@ -179,30 +184,32 @@ with col_main:
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)"
     )
-    st.plotly_chart(fig_heat, width="stretch")
+    st.plotly_chart(fig_heat, use_container_width=True)
 
 with col_feed:
     st.subheader("Live Agent Alert Log")
     
     if not alerts_df.empty:
-        filtered_df = alerts_df[alerts_df['risk_level'].isin(selected_risk)] if 'risk_level' in alerts_df.columns else alerts_df
-        
-        for _, row in filtered_df.iterrows():
-            risk = row.get('risk_level', 'ALERT')
-            border_color = "#FF4B4B" if risk == "OUTBREAK" else "#FFAA00"
-            badge_class = "badge-outbreak" if risk == "OUTBREAK" else "badge-warning"
+        for idx, row in alerts_df.iterrows():
+            risk = row.get('risk_level', row.get('status', 'TRIGGERED'))
+            border_color = "#FF4B4B" if risk in ["OUTBREAK", "TRIGGERED"] else "#FFAA00"
+            badge_class = "badge-outbreak" if risk in ["OUTBREAK", "TRIGGERED"] else "badge-warning"
+            
+            syndrome = row.get('syndrome_code', row.get('syndrome', 'UNKNOWN_SYNDROME'))
+            score = row.get('z_score', row.get('anomaly_score', 0.0))
+            alert_id = row.get('id', idx + 1)
             
             st.markdown(f"""
                 <div style="background-color: #161B22; border-left: 4px solid {border_color}; padding: 12px; border-radius: 4px; margin-bottom: 12px;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <span class="{badge_class}">{risk}</span>
-                        <small style="color: #8B949E;">Alert #{row.get('id', 'N/A')}</small>
+                        <small style="color: #8B949E;">Alert #{alert_id}</small>
                     </div>
                     <div style="margin-top: 8px;">
-                        <strong style="font-size: 1.05rem;">{row.get('syndrome_code', 'SYNDROME_ALERT')}</strong>
+                        <strong style="font-size: 1.05rem;">{syndrome}</strong>
                     </div>
                     <div style="color: #8B949E; font-size: 0.85rem; margin-top: 4px;">
-                        Z-Score: <code style="color: #58A6FF;">{row.get('z_score', 0.0):.2f}</code>
+                        Score: <code style="color: #58A6FF;">{score:.2f}</code>
                     </div>
                 </div>
             """, unsafe_allow_html=True)
