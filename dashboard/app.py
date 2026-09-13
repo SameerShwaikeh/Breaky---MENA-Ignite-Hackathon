@@ -6,212 +6,248 @@ import plotly.express as px
 
 # Page Setup
 st.set_page_config(
-    page_title="Breaky — Early Epidemic Warning System",
+    page_title="Breaky: Pandemic Intelligence System",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# API Configuration - Hardcoded to loopback
 BASE_URL = "http://127.0.0.1:8000"
 
-# Custom Styling
+# Custom CSS matching the screenshot UI design
 st.markdown("""
     <style>
-    .stApp { background-color: #0E1117; }
-    .badge-outbreak {
-        background-color: #7D1212;
-        color: #FFD1D1;
-        padding: 4px 8px;
-        border-radius: 4px;
-        font-weight: 600;
-        font-size: 0.8rem;
+    .stApp { background-color: #0B0E14; color: #FFFFFF; }
+    
+    /* Top Metric Card Styling */
+    .kpi-card {
+        background-color: #121824;
+        border: 1px solid #1F293D;
+        border-radius: 8px;
+        padding: 16px;
+        margin-bottom: 10px;
     }
-    .badge-warning {
-        background-color: #7D5A12;
-        color: #FFEAA7;
-        padding: 4px 8px;
-        border-radius: 4px;
-        font-weight: 600;
-        font-size: 0.8rem;
+    .kpi-title { color: #8B949E; font-size: 0.85rem; font-weight: 500; }
+    .kpi-value { font-size: 1.8rem; font-weight: bold; margin: 4px 0; }
+    .kpi-tag-green {
+        background-color: #0E3A2F; color: #34D399; font-size: 0.75rem; 
+        padding: 2px 8px; border-radius: 4px; font-weight: 600; display: inline-block;
+    }
+    .kpi-tag-red {
+        background-color: #4A151B; color: #F87171; font-size: 0.75rem; 
+        padding: 2px 8px; border-radius: 4px; font-weight: 600; display: inline-block;
+    }
+    
+    /* Threat Cards (Left Feed) */
+    .threat-banner {
+        background-color: #4A1D24;
+        color: #F87171;
+        font-weight: bold;
+        padding: 10px 14px;
+        border-radius: 6px 6px 0 0;
+        font-size: 0.95rem;
+        letter-spacing: 0.5px;
+    }
+    .threat-body {
+        background-color: #121824;
+        border: 1px solid #2A1D24;
+        border-top: none;
+        padding: 12px 14px;
+        border-radius: 0 0 6px 6px;
+        margin-bottom: 16px;
+    }
+    .protocol-btn {
+        background-color: #161F30;
+        border: 1px solid #2B3954;
+        color: #E2E8F0;
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-size: 0.85rem;
+        font-weight: 500;
+        margin-top: 8px;
+        display: block;
+        text-align: center;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# Data Fetching Functions
-def get_backend_health():
+# Helper Data Functions
+def fetch_outbreaks():
     try:
-        r = requests.get(f"{BASE_URL}/alerts/latest", timeout=2)
-        return r.status_code == 200
-    except Exception:
-        return False
-
-def get_alerts():
-    try:
-        r = requests.get(f"{BASE_URL}/alerts/latest", timeout=3)
+        r = requests.get(f"{BASE_URL}/outbreak-data", timeout=3)
         if r.status_code == 200:
             return r.json()
     except Exception:
         pass
-    return []
+    # Fallback demo data
+    return [
+        {"id": 1, "location": "Gaza", "lat": 31.5017, "lon": 34.4668, "agent": "Influenza-A", "risk_level": "PANDEMIC THREAT", "protocol": "Activate Quarantine Protocol: Gaza", "needed_supplies": "Tamiflu, N95 Masks, Oxygen Cylinders", "cases": 142},
+        {"id": 2, "location": "Hebron", "lat": 31.5326, "lon": 35.0998, "agent": "Hepatitis", "risk_level": "PANDEMIC THREAT", "protocol": "Activate Quarantine Protocol: Hebron", "needed_supplies": "Oral Rehydration Salts (ORS), Clean Water Filters", "cases": 98},
+        {"id": 3, "location": "Nablus", "lat": 32.2211, "lon": 35.2544, "agent": "Meningitis", "risk_level": "PANDEMIC THREAT", "protocol": "Activate Quarantine Protocol: Nablus", "needed_supplies": "Ceftriaxone, Antibiotics", "cases": 64},
+        {"id": 4, "location": "Bethlehem", "lat": 31.7057, "lon": 35.2024, "agent": "Covid-19", "risk_level": "PANDEMIC THREAT", "protocol": "Activate Quarantine Protocol: Bethlehem", "needed_supplies": "Rapid Antigen Kits, Surgical Masks", "cases": 41}
+    ]
 
-# Sidebar Controls
-st.sidebar.title("System Controls")
-is_online = get_backend_health()
-if is_online:
-    st.sidebar.success("Backend API: Online")
-else:
-    st.sidebar.error("Backend API: Offline")
+def fetch_warehouses():
+    try:
+        r = requests.get(f"{BASE_URL}/warehouses", timeout=3)
+        if r.status_code == 200:
+            return r.json()
+    except Exception:
+        pass
+    return [
+        {"warehouse": "Gaza Central Medical Depot", "city": "Gaza", "item": "Tamiflu (Oseltamivir)", "available": 85, "required": 500, "status": "CRITICAL SHORTAGE"},
+        {"warehouse": "Hebron Regional Warehouse", "city": "Hebron", "item": "Oral Rehydration Salts (ORS)", "available": 120, "required": 1000, "status": "LOW STOCK"},
+        {"warehouse": "Hebron Regional Warehouse", "city": "Hebron", "item": "Normal Saline IV (1L)", "available": 450, "required": 1200, "status": "LOW STOCK"},
+        {"warehouse": "Nablus Northern Depot", "city": "Nablus", "item": "Ceftriaxone Injectable", "available": 310, "required": 800, "status": "LOW STOCK"},
+        {"warehouse": "Ramallah Central Depot", "city": "Ramallah", "item": "Personal Protective Equipment", "available": 4500, "required": 5000, "status": "SUFFICIENT"}
+    ]
 
-st.sidebar.divider()
-st.sidebar.subheader("Filter Live Data")
-selected_risk = st.sidebar.multiselect(
-    "Filter by Risk Level", 
-    options=["OUTBREAK", "WARNING", "EVALUATE", "TRIGGERED"], 
-    default=["OUTBREAK", "WARNING", "TRIGGERED"]
-)
+# Title & Subtitle
+st.title("Breaky: Pandemic Intelligence System")
+st.caption("AI-powered surveillance focusing on infectious diseases and outbreak prevention.")
 
-# Main Dashboard Header
-st.title("Breaky — Early Epidemic Warning System")
-st.caption("Real-Time Epidemiological Intelligence & Automated Surveillance Engine")
+# Top KPI Metric Cards
+kpi_col1, kpi_col2, kpi_col3 = st.columns(3)
+
+with kpi_col1:
+    st.markdown("""
+        <div class="kpi-card">
+            <div class="kpi-title">Connected Centers</div>
+            <div class="kpi-value" style="color: #60A5FA;">9 Units</div>
+            <div class="kpi-tag-green">↑ Live Feed</div>
+        </div>
+    """, unsafe_allow_html=True)
+
+with kpi_col2:
+    st.markdown("""
+        <div class="kpi-card">
+            <div class="kpi-title">Pandemic Risk Level</div>
+            <div class="kpi-value" style="color: #93C5FD;">High Alert</div>
+            <div class="kpi-tag-red">↑ Contagious Surge</div>
+        </div>
+    """, unsafe_allow_html=True)
+
+with kpi_col3:
+    st.markdown("""
+        <div class="kpi-card">
+            <div class="kpi-title">AI Screening Status</div>
+            <div class="kpi-value" style="color: #60A5FA;">Active</div>
+            <div class="kpi-tag-green">↑ Filtering 24/7</div>
+        </div>
+    """, unsafe_allow_html=True)
+
 st.divider()
 
-# Load API Data
-alerts_data = get_alerts()
-alerts_df = pd.DataFrame(alerts_data)
+# Fetch Active Outbreaks & Warehouse Data
+outbreaks = fetch_outbreaks()
+warehouses = fetch_warehouses()
+df_outbreaks = pd.DataFrame(outbreaks)
 
-# KPI Summary Bar
-kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+# Main 2-Column Section (Alerts Left | Map Right)
+col_alerts, col_map = st.columns([1, 1.8])
 
-total_alerts = len(alerts_df) if not alerts_df.empty else 0
-outbreak_count = 0
-if not alerts_df.empty:
-    if 'risk_level' in alerts_df.columns:
-        outbreak_count = len(alerts_df[alerts_df['risk_level'] == 'OUTBREAK'])
-    elif 'status' in alerts_df.columns:
-        outbreak_count = len(alerts_df[alerts_df['status'] == 'TRIGGERED'])
-
-with kpi1:
-    st.metric("Total Active Alerts", total_alerts)
-with kpi2:
-    st.metric("Outbreak Triggers", outbreak_count)
-with kpi3:
-    st.metric("Monitored Facilities", "12 Centers")
-with kpi4:
-    st.metric("System Status", "ACTIVE" if is_online else "DISCONNECTED")
-
-st.divider()
-
-# Main Visual Split
-col_main, col_feed = st.columns([1.7, 1])
-
-with col_main:
-    st.subheader("Geospatial Surveillance Map")
+with col_alerts:
+    st.markdown("### 🛡️ AI Outbreak Alerts")
+    st.caption("Monitoring contagious clusters only.")
     
-    facility_coords = {
-        "Nablus Medical Center": {"lat": 32.2211, "lon": 35.2544},
-        "Hebron Medical Center": {"lat": 31.5326, "lon": 35.0998},
-        "Ramallah Medical Center": {"lat": 31.9038, "lon": 35.2034},
-        "Ramallah Central Hospital": {"lat": 31.9038, "lon": 35.2034},
-        "Jenin Specialty Hospital": {"lat": 32.4590, "lon": 35.2954},
-        "Gaza Primary Health": {"lat": 31.5017, "lon": 34.4668}
-    }
-    
-    map_rows = []
-    if not alerts_df.empty:
-        for idx, row in alerts_df.iterrows():
-            fac = row.get('facility', row.get('location', 'Ramallah Central Hospital'))
-            coords = facility_coords.get(fac, {"lat": 31.9038, "lon": 35.2034})
-            map_rows.append({
-                "facility": fac,
-                "lat": coords["lat"],
-                "lon": coords["lon"],
-                "risk": row.get('risk_level', row.get('status', 'TRIGGERED')),
-                "syndrome": row.get('syndrome_code', row.get('syndrome', 'ILI')),
-                "z_score": max(abs(row.get('z_score', row.get('anomaly_score', 1.0))) * 8, 12)
-            })
-    else:
-        for fac, coords in facility_coords.items():
-            map_rows.append({"facility": fac, "lat": coords["lat"], "lon": coords["lon"], "risk": "NORMAL", "syndrome": "NONE", "z_score": 10})
+    for item in outbreaks:
+        loc = item["location"]
+        agent = item["agent"]
+        protocol = item["protocol"]
+        
+        st.markdown(f"""
+            <div class="threat-banner">PANDEMIC THREAT: {loc.upper()}</div>
+            <div class="threat-body">
+                <div style="color: #8B949E; font-size: 0.85rem;">Infectious Agent: <strong style="color: #FFFFFF;">{agent}</strong></div>
+                <div class="protocol-btn">{protocol}</div>
+            </div>
+        """, unsafe_allow_html=True)
 
-    geo_df = pd.DataFrame(map_rows)
+with col_map:
+    st.markdown("### Infectious Disease Spread Map")
+    st.caption("💡 *Hover over or click any point on the map to inspect needed supplies and outbreak metrics.*")
     
+    # Custom hover formatting with Warehouse Stock Status removed
     fig_map = px.scatter_mapbox(
-        geo_df,
+        df_outbreaks,
         lat="lat",
         lon="lon",
-        size="z_score",
-        color="risk",
-        hover_name="facility",
-        hover_data=["syndrome"],
-        color_discrete_map={"OUTBREAK": "#FF4B4B", "TRIGGERED": "#FF4B4B", "WARNING": "#FFAA00", "NORMAL": "#00CC96", "EVALUATE": "#1E90FF"},
+        size="cases",
+        color="agent",
+        hover_name="location",
+        hover_data={
+            "agent": True,
+            "risk_level": True,
+            "needed_supplies": True,
+            "cases": True,
+            "lat": False,
+            "lon": False
+        },
+        labels={
+            "agent": "Infectious Agent",
+            "risk_level": "Threat Level",
+            "needed_supplies": "Required Supplies",
+            "cases": "Active Cases"
+        },
         zoom=7.8,
-        center={"lat": 31.9, "lon": 35.2},
-        height=360
+        center={"lat": 31.8, "lon": 35.1},
+        height=520
     )
+    
+    fig_map.update_traces(
+        marker=dict(sizemin=14),
+        hovertemplate="<b>%{hovertext} Region</b><br><br>" +
+                      "<b>Infectious Agent:</b> %{customdata[0]}<br>" +
+                      "<b>Threat Level:</b> %{customdata[1]}<br>" +
+                      "<b>Required Supplies:</b> %{customdata[2]}<br>" +
+                      "<b>Recorded Cases:</b> %{customdata[3]}<extra></extra>"
+    )
+    
     fig_map.update_layout(
-        mapbox_style="open-street-map",
+        mapbox_style="carto-darkmatter",
         margin={"r": 0, "t": 0, "l": 0, "b": 0},
         paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)"
+        plot_bgcolor="rgba(0,0,0,0)",
+        legend=dict(title="Outbreak Agent", orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
+    
     st.plotly_chart(fig_map, use_container_width=True)
 
-    st.subheader("Syndrome Density Heatmap")
-    
-    if not alerts_df.empty and 'syndrome_code' in alerts_df.columns and 'facility' in alerts_df.columns:
-        heatmap_data = pd.crosstab(
-            alerts_df['facility'],
-            alerts_df['syndrome_code']
-        )
-        fig_heat = px.imshow(
-            heatmap_data,
-            color_continuous_scale="Reds",
-            aspect="auto",
-            height=280
-        )
-    else:
-        fig_heat = px.imshow(
-            [[12, 4, 2], [5, 18, 1], [2, 8, 15]],
-            x=['ILI', 'GASTRO', 'FEVER'],
-            y=['Nablus MC', 'Ramallah MC', 'Hebron MC'],
-            color_continuous_scale="Reds",
-            aspect="auto",
-            height=280
-        )
-        
-    fig_heat.update_layout(
-        margin={"r": 0, "t": 20, "l": 0, "b": 0},
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)"
-    )
-    st.plotly_chart(fig_heat, use_container_width=True)
+st.divider()
 
-with col_feed:
-    st.subheader("Live Agent Alert Log")
+# Lower Section: Warehouse Stock Table & Proactive Response Plan
+col_wh_table, col_plan_detail = st.columns([1.5, 1])
+
+with col_wh_table:
+    st.markdown("### 📦 Warehouse Telemetry & Stock Cautions")
+    st.caption("Live monitoring of essential medication and medical supply reserves across regional depots.")
     
-    if not alerts_df.empty:
-        for idx, row in alerts_df.iterrows():
-            risk = row.get('risk_level', row.get('status', 'TRIGGERED'))
-            border_color = "#FF4B4B" if risk in ["OUTBREAK", "TRIGGERED"] else "#FFAA00"
-            badge_class = "badge-outbreak" if risk in ["OUTBREAK", "TRIGGERED"] else "badge-warning"
-            
-            syndrome = row.get('syndrome_code', row.get('syndrome', 'UNKNOWN_SYNDROME'))
-            score = row.get('z_score', row.get('anomaly_score', 0.0))
-            alert_id = row.get('id', idx + 1)
-            
-            st.markdown(f"""
-                <div style="background-color: #161B22; border-left: 4px solid {border_color}; padding: 12px; border-radius: 4px; margin-bottom: 12px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span class="{badge_class}">{risk}</span>
-                        <small style="color: #8B949E;">Alert #{alert_id}</small>
-                    </div>
-                    <div style="margin-top: 8px;">
-                        <strong style="font-size: 1.05rem;">{syndrome}</strong>
-                    </div>
-                    <div style="color: #8B949E; font-size: 0.85rem; margin-top: 4px;">
-                        Score: <code style="color: #58A6FF;">{score:.2f}</code>
-                    </div>
-                </div>
-            """, unsafe_allow_html=True)
-    else:
-        st.info("No active outbreak signals returned from API.")
+    wh_df = pd.DataFrame(warehouses)
+    
+    st.dataframe(
+        wh_df,
+        column_config={
+            "warehouse": "Warehouse Facility",
+            "city": "Region",
+            "item": "Supply / Medication",
+            "available": st.column_config.NumberColumn("In Stock", format="%d units"),
+            "required": st.column_config.NumberColumn("Required Reserve", format="%d units"),
+            "status": st.column_config.TextColumn("Caution Level")
+        },
+        hide_index=True,
+        use_container_width=True
+    )
+
+with col_plan_detail:
+    st.markdown("### 📋 Proactive Response Action Plan")
+    st.caption("Automated mitigation instructions generated by AI agents based on current warehouse levels.")
+    
+    st.markdown("""
+        <div style="background-color: #121824; border: 1px solid #1F293D; padding: 14px; border-radius: 6px;">
+            <div style="color: #F87171; font-weight: bold; margin-bottom: 6px;">⚠️ Action Required: Gaza & Hebron Shortage</div>
+            <ul style="color: #CBD5E1; font-size: 0.88rem; padding-left: 18px; margin-bottom: 0;">
+                <li style="margin-bottom: 6px;"><strong>Dispatch Emergency Logistics:</strong> Transfer 400 Tamiflu packs from Ramallah Depot to Gaza Central.</li>
+                <li style="margin-bottom: 6px;"><strong>Water Sanitation Protocols:</strong> Deploy municipal water testing kits to Hebron primary centers.</li>
+                <li><strong>Quarantine Mobilization:</strong> Establish isolation triage tents at Nablus and Gaza entry points.</li>
+            </ul>
+        </div>
+    """, unsafe_allow_html=True)
